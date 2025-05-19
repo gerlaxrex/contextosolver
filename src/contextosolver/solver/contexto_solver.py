@@ -100,7 +100,7 @@ class ContextoSolver:
                 collection_name=self.collection_name,
                 query=query_embedding,
                 limit=self.top_n,
-                search_params=models.SearchParams(hnsw_ef=600),
+                search_params=models.SearchParams(hnsw_ef=128),
             )
 
             # Process search results
@@ -225,7 +225,7 @@ if __name__ == "__main__":
         os.getenv("QDRANT_URL"),
         api_key=os.getenv("QDRANT_API_KEY"),
     )
-    contexto_client = ContextoClient(game_id=974)
+    contexto_client = ContextoClient(game_id=973)
 
     # create the solver
     contexto_solver = ContextoSolver(
@@ -236,7 +236,7 @@ if __name__ == "__main__":
         max_guesses=500,
         warmup_words=12,
         top_n=1000,
-        top_k_words=5,
+        top_k_words=10,
     )
 
     result = contexto_solver.solve()
