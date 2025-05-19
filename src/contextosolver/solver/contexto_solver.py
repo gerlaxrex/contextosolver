@@ -23,14 +23,6 @@ class ContextoSolver:
         warmup_words: int = 10,
         top_k_words: int = 5,
     ):
-        """
-        Initialize the Contexto solver using Qdrant and fastembed.
-
-        Args:
-            collection_name: Name for the Qdrant collection
-            initial_words: Optional list of words to start with
-            top_n: Number of top candidates to consider at each step
-        """
         self.embedding_model = embedding_model
         self.embedding_dim = len(list(self.embedding_model.embed("test"))[0])
         self.qdrant_client = qdrant_client
@@ -60,10 +52,13 @@ class ContextoSolver:
         ]
 
         self.guessed_words = {}
+        # these lists represent:
+        # - the words that have very low scores
+        # - exclude words given eventual sub-zones of the blacklisted words
         self.blacklisted_words = set()
+        self.excluded_subzone = set()
 
     def get_next_guess(self) -> str:
-        """Determine the next word to guess based on current information."""
         # first use randomly some initial word
         if self.initial_words and len(self.guessed_words) < self.warmup_words:
             return self.initial_words[len(self.guessed_words)]
@@ -72,7 +67,6 @@ class ContextoSolver:
         return self._enhanced_select_best_candidate()
 
     def _select_best_candidate(self) -> str:
-        """Select the best candidate word based on learned information."""
         # if we did not have any guessed words then go random
         if not self.guessed_words:
             return random.choice(self.initial_words)
@@ -139,7 +133,6 @@ class ContextoSolver:
         return best_candidate
 
     def _enhanced_select_best_candidate(self) -> str:
-        """Select the best candidate word based on learned information."""
         # if we did not have any guessed words then go random
         if not self.guessed_words:
             return random.choice(self.initial_words)
@@ -151,20 +144,17 @@ class ContextoSolver:
             key=lambda x: x[1],
         )
 
-        # Get embeddings for our best guesses
+        # inverse ranking weighting average
         best_words = [word for word, _ in best_guesses]
-
-        # Inverse-rank weighting for centroid
         vectors = list(self.embedding_model.embed(best_words))
         ranks = [rank for _, rank in best_guesses]
         weights = [1 / (rank + 1) for rank in ranks]
         weighted_sum = sum(w * v for w, v in zip(weights, vectors))
         centroid_embedding = weighted_sum / sum(weights)
 
-        # We'll store candidate scores here
         candidate_scores = {}
 
-        # For each of our best guesses, find similar words
+        # find nbs for the avg vector
         search_results = self.qdrant_client.query_points(
             collection_name=self.collection_name,
             query=centroid_embedding,
@@ -172,37 +162,29 @@ class ContextoSolver:
             search_params=models.SearchParams(hnsw_ef=600),
         )
 
-        # Process search results
         for result in search_results.points:
             candidate = result.payload["word"]
 
             # skip the word if already guessed or tried
-            if candidate in self.guessed_words:
+            if candidate in self.guessed_words or candidate in self.blacklisted_words:
                 continue
 
-            # weight by the distance score
-            weight = 1.0
-            similarity = result.score
-            score = similarity * weight
-
-            #
-            if candidate in candidate_scores:
-                candidate_scores[candidate] += score
-            else:
-                candidate_scores[candidate] = score
+            candidate_scores[candidate] = result.score
 
         if not candidate_scores:
             # if we could not find anything, maybe try randomly generating with an LLM...
+            # or as a fallback we should perform some sort of clustering over the top words, have the neighbors
+            # and eventually
             raise RuntimeError("No candidate could be found!")
 
         best_candidate = max(candidate_scores.items(), key=lambda x: x[1])[0]
         return best_candidate
 
     def update_with_feedback(self, word: str, ranking: int):
-        """Update our knowledge with the feedback from our guess."""
         self.guessed_words[word] = ranking
 
         if ranking > 4000:
+            # it is needed for excluding sub-regions of embeddings
             self.blacklisted_words.add(word)
 
     def solve(self):
@@ -243,7 +225,7 @@ if __name__ == "__main__":
         os.getenv("QDRANT_URL"),
         api_key=os.getenv("QDRANT_API_KEY"),
     )
-    contexto_client = ContextoClient(game_id=970)
+    contexto_client = ContextoClient(game_id=974)
 
     # create the solver
     contexto_solver = ContextoSolver(
