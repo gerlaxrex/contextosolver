@@ -1,12 +1,14 @@
 import heapq
+import json
 import random
 import time
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 from fastembed import TextEmbedding
 from qdrant_client import QdrantClient, models
 from loguru import logger
 
+from src.contextosolver import DATA_PATH
 from src.contextosolver.solver.contexto_client import ContextoClient
 
 
@@ -31,6 +33,9 @@ class ContextoSolver:
         self.warmup_words = warmup_words
         self.top_k_words = top_k_words
 
+        with open(DATA_PATH / "unique_lemmas.json", "r", encoding="utf-8") as f:
+            self.lemmas = json.load(f)
+
         self.collection_name = collection_name
         self.top_n = top_n
 
@@ -52,11 +57,16 @@ class ContextoSolver:
         ]
 
         self.guessed_words = {}
-        # these lists represent:
+        # this lists represent:
         # - the words that have very low scores
         # - exclude words given eventual sub-zones of the blacklisted words
-        self.blacklisted_words = set()
-        self.excluded_subzone = set()
+        self.blacklisted_words = {}
+
+    def _get_random_word(self) -> str:
+        random_word = random.choice(self.lemmas)
+        while random_word in self.guessed_words:
+            random_word = random.choice(self.lemmas)
+        return random_word
 
     def get_next_guess(self) -> str:
         # first use randomly some initial word
@@ -65,6 +75,16 @@ class ContextoSolver:
 
         # semantic search on qdrant
         return self._enhanced_select_best_candidate()
+
+    def _weighted_embeddings(self, ranked_words: List[Tuple[str, int]]) -> List[float]:
+        words = [word for word, _ in ranked_words]
+        vectors = list(self.embedding_model.embed(words))
+        ranks = [rank for _, rank in ranked_words]
+        # weights on the rank
+        weights = [1 / (rank + 1) for rank in ranks]
+        weighted_sum = sum(w * v for w, v in zip(weights, vectors))
+        centroid_embedding = weighted_sum / sum(weights)
+        return centroid_embedding
 
     def _select_best_candidate(self) -> str:
         # if we did not have any guessed words then go random
@@ -126,8 +146,8 @@ class ContextoSolver:
                     candidate_scores[candidate] = score
 
         if not candidate_scores:
-            # if we could not find anything, maybe try randomly generating with an LLM...
-            raise RuntimeError("No candidate could be found!")
+            logger.warning("No word can be selected... trying a random sampling...")
+            return self._get_random_word()
 
         best_candidate = max(candidate_scores.items(), key=lambda x: x[1])[0]
         return best_candidate
@@ -144,14 +164,15 @@ class ContextoSolver:
             key=lambda x: x[1],
         )
 
-        # inverse ranking weighting average
-        best_words = [word for word, _ in best_guesses]
-        vectors = list(self.embedding_model.embed(best_words))
-        ranks = [rank for _, rank in best_guesses]
-        weights = [1 / (rank + 1) for rank in ranks]
-        weighted_sum = sum(w * v for w, v in zip(weights, vectors))
-        centroid_embedding = weighted_sum / sum(weights)
+        # take the negative matches
+        worst_guesses = heapq.nsmallest(
+            min(100, len(self.blacklisted_words)),
+            self.blacklisted_words.items(),
+            key=lambda x: x[1],
+        )
 
+        # inverse ranking weighting average
+        centroid_embedding = self._weighted_embeddings(best_guesses)
         candidate_scores = {}
 
         # find nbs for the avg vector
@@ -164,18 +185,27 @@ class ContextoSolver:
 
         for result in search_results.points:
             candidate = result.payload["word"]
+            if not (
+                candidate in self.guessed_words or candidate in self.blacklisted_words
+            ):
+                candidate_scores[candidate] = result.score
 
-            # skip the word if already guessed or tried
-            if candidate in self.guessed_words or candidate in self.blacklisted_words:
-                continue
+        # now take the average for the clusters obtained in the blacklisted words
+        blacklist_embedding = self._weighted_embeddings(worst_guesses)
 
-            candidate_scores[candidate] = result.score
+        negative_results = self.qdrant_client.query_points(
+            collection_name="contexto_words",
+            query=blacklist_embedding,
+            limit=100,
+        )
+
+        for negative_result in negative_results.points:
+            candidate = negative_result.payload["word"]
+            if candidate in candidate_scores:
+                candidate_scores[candidate] -= 0.5 * negative_result.score
 
         if not candidate_scores:
-            # if we could not find anything, maybe try randomly generating with an LLM...
-            # or as a fallback we should perform some sort of clustering over the top words, have the neighbors
-            # and eventually
-            raise RuntimeError("No candidate could be found!")
+            return self._get_random_word()
 
         best_candidate = max(candidate_scores.items(), key=lambda x: x[1])[0]
         return best_candidate
@@ -183,9 +213,9 @@ class ContextoSolver:
     def update_with_feedback(self, word: str, ranking: int):
         self.guessed_words[word] = ranking
 
-        if ranking > 4000:
+        if ranking > 2000:
             # it is needed for excluding sub-regions of embeddings
-            self.blacklisted_words.add(word)
+            self.blacklisted_words[word] = ranking
 
     def solve(self):
         guesses = []
@@ -225,7 +255,7 @@ if __name__ == "__main__":
         os.getenv("QDRANT_URL"),
         api_key=os.getenv("QDRANT_API_KEY"),
     )
-    contexto_client = ContextoClient(game_id=973)
+    contexto_client = ContextoClient(game_id=975)
 
     # create the solver
     contexto_solver = ContextoSolver(
@@ -236,7 +266,7 @@ if __name__ == "__main__":
         max_guesses=500,
         warmup_words=12,
         top_n=1000,
-        top_k_words=10,
+        top_k_words=4,
     )
 
     result = contexto_solver.solve()
