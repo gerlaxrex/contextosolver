@@ -57,6 +57,7 @@ class ContextoSolver:
         ]
 
         self.guessed_words = {}
+        self.words_to_exclude = set()
         # this lists represent:
         # - the words that have very low scores
         # - exclude words given eventual sub-zones of the blacklisted words
@@ -81,76 +82,15 @@ class ContextoSolver:
         vectors = list(self.embedding_model.embed(words))
         ranks = [rank for _, rank in ranked_words]
         # weights on the rank
-        weights = [1 / (rank + 1) for rank in ranks]
+        if max(ranks) == min(ranks):
+            weights = [1.0] * len(ranks)
+        else:
+            weights = [
+                (max(ranks) - rank) / (max(ranks) - min(ranks)) for rank in ranks
+            ]
         weighted_sum = sum(w * v for w, v in zip(weights, vectors))
         centroid_embedding = weighted_sum / sum(weights)
         return centroid_embedding
-
-    def _select_best_candidate(self) -> str:
-        # if we did not have any guessed words then go random
-        if not self.guessed_words:
-            return random.choice(self.initial_words)
-
-        # take the top_k_words for the ones currently explored
-        best_guesses = heapq.nsmallest(
-            min(self.top_k_words, len(self.guessed_words)),
-            self.guessed_words.items(),
-            key=lambda x: x[1],
-        )
-
-        # Get embeddings for our best guesses
-        best_words = [word for word, _ in best_guesses]
-
-        # progressively use all the words
-
-        queries = best_words + [
-            " ".join(best_words[: i + 1]) for i in range(len(best_words))
-        ]
-
-        best_word_embeddings = self.embedding_model.embed(queries)
-
-        # We'll store candidate scores here
-        candidate_scores = {}
-
-        # For each of our best guesses, find similar words
-        for i, ((word, rank), query_embedding) in enumerate(
-            zip(best_guesses, best_word_embeddings)
-        ):
-            search_results = self.qdrant_client.query_points(
-                collection_name=self.collection_name,
-                query=query_embedding,
-                limit=self.top_n,
-                search_params=models.SearchParams(hnsw_ef=128),
-            )
-
-            # Process search results
-            for result in search_results.points:
-                candidate = result.payload["word"]
-
-                # skip the word if already guessed or tried
-                if (
-                    candidate in self.guessed_words
-                    or candidate in self.blacklisted_words
-                ):
-                    continue
-
-                # weight by the distance score
-                weight = 1.0 / (rank + 1)
-                similarity = result.score
-                score = similarity * weight
-
-                #
-                if candidate in candidate_scores:
-                    candidate_scores[candidate] += score
-                else:
-                    candidate_scores[candidate] = score
-
-        if not candidate_scores:
-            logger.warning("No word can be selected... trying a random sampling...")
-            return self._get_random_word()
-
-        best_candidate = max(candidate_scores.items(), key=lambda x: x[1])[0]
-        return best_candidate
 
     def _enhanced_select_best_candidate(self) -> str:
         # if we did not have any guessed words then go random
@@ -166,7 +106,7 @@ class ContextoSolver:
 
         # take the negative matches
         worst_guesses = heapq.nsmallest(
-            min(100, len(self.blacklisted_words)),
+            min(50, len(self.blacklisted_words)),
             self.blacklisted_words.items(),
             key=lambda x: x[1],
         )
@@ -185,9 +125,7 @@ class ContextoSolver:
 
         for result in search_results.points:
             candidate = result.payload["word"]
-            if not (
-                candidate in self.guessed_words or candidate in self.blacklisted_words
-            ):
+            if candidate not in self.words_to_exclude:
                 candidate_scores[candidate] = result.score
 
         # now take the average for the clusters obtained in the blacklisted words
@@ -202,7 +140,7 @@ class ContextoSolver:
         for negative_result in negative_results.points:
             candidate = negative_result.payload["word"]
             if candidate in candidate_scores:
-                candidate_scores[candidate] -= 0.5 * negative_result.score
+                candidate_scores[candidate] -= negative_result.score
 
         if not candidate_scores:
             return self._get_random_word()
@@ -210,12 +148,14 @@ class ContextoSolver:
         best_candidate = max(candidate_scores.items(), key=lambda x: x[1])[0]
         return best_candidate
 
-    def update_with_feedback(self, word: str, ranking: int):
-        self.guessed_words[word] = ranking
+    def update_with_feedback(self, word: str, lemma: str, ranking: int):
+        self.guessed_words[lemma] = ranking
+        self.words_to_exclude.add(word)
+        self.words_to_exclude.add(lemma)
 
         if ranking > 2000:
             # it is needed for excluding sub-regions of embeddings
-            self.blacklisted_words[word] = ranking
+            self.blacklisted_words[lemma] = ranking
 
     def solve(self):
         guesses = []
@@ -227,12 +167,12 @@ class ContextoSolver:
 
             if not ranking:
                 # in case there is an error or word does not exists
-                self.update_with_feedback(next_word, 500_000)
+                self.update_with_feedback(next_word, next_word, 500_000)
                 guesses.append((next_word, 500_000))
                 logger.warning(f"word {next_word} does not exist!")
                 continue
 
-            self.update_with_feedback(ranking.word, ranking.distance)
+            self.update_with_feedback(ranking.word, ranking.lemma, ranking.distance)
             guesses.append((ranking.word, ranking.distance))
             logger.info(f"Guess {i + 1}: {ranking}")
 
@@ -255,7 +195,7 @@ if __name__ == "__main__":
         os.getenv("QDRANT_URL"),
         api_key=os.getenv("QDRANT_API_KEY"),
     )
-    contexto_client = ContextoClient(game_id=975)
+    contexto_client = ContextoClient(game_id=974)
 
     # create the solver
     contexto_solver = ContextoSolver(
