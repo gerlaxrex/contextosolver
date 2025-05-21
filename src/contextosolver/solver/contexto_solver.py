@@ -9,9 +9,9 @@ from typing import Optional, List, Tuple, Dict
 from fastembed import TextEmbedding
 from qdrant_client import QdrantClient, models
 from loguru import logger
-from src.contextosolver import DATA_PATH
-from src.contextosolver.config.contexto_config import ContextoConfig
-from src.contextosolver.solver.contexto_client import ContextoClient
+from contextosolver import DATA_PATH
+from contextosolver.config.contexto_config import ContextoConfig
+from contextosolver.solver.contexto_client import ContextoClient
 
 MAX_SCORE = 500_000
 

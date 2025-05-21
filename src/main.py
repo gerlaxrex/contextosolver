@@ -3,8 +3,8 @@ import argparse
 from fastembed import TextEmbedding
 from qdrant_client import QdrantClient
 import os
-from src.contextosolver.solver.contexto_client import ContextoClient
-from src.contextosolver.solver.contexto_solver import ContextoConfig, ContextoSolver
+from contextosolver.solver.contexto_client import ContextoClient
+from contextosolver.solver.contexto_solver import ContextoConfig, ContextoSolver
 
 
 def main(game_id: int):
