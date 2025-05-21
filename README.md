@@ -47,6 +47,11 @@ The solver is composed of:
 5. **Fallback and Randomization**
    If no strong candidates are found, or all high-similarity candidates are blacklisted, a random unseen word is selected to keep the exploration moving.
 
+> [!TIP]
+> * The number and quality of initial warmup words affect early convergence.
+> * The negative penalty mechanism becomes most effective in the mid-to-late game when enough poor guesses have accumulated.
+> * Adjust `ContextoConfig` to tune search aggressiveness (e.g., `top_k_words`, `top_n`, and penalty weights).
+
 ## Running the Solver
 
 As a first step install all the dependencies (I used uv as a package manager):
@@ -68,9 +73,3 @@ uv run main.py <game-id>
 ```
 
 This will launch the solver on the specified game.
-
-## Tips
-
-* The number and quality of initial warmup words affect early convergence.
-* The negative penalty mechanism becomes most effective in the mid-to-late game when enough poor guesses have accumulated.
-* Adjust `ContextoConfig` to tune search aggressiveness (e.g., `top_k_words`, `top_n`, and penalty weights).
