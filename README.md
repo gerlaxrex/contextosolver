@@ -1,45 +1,76 @@
 # Contexto Solver
 
-This repository contains a solver for the game contexto.me. It uses word embeddings, Qdrant as a vector search engine, and a bit of strategy to guess the secret word efficiently.
+This repository contains a solver for the game [contexto.me](https://contexto.me). It uses word embeddings, [Qdrant](https://qdrant.tech) as a vector search engine, and a strategic guessing process to identify the secret word.
 
 ## Overview
 
-The idea is to treat this as a sort of search problem: we try a word, get a ranking back (how close we are to the target), and use that feedback to guide our next guess. The ranking acts like a reward signal, and we use the top-performing guesses to search semantically similar words in embedding space.
+Each guess in Contexto returns a ranking that indicates how semantically close the word (more specifically, its __lemma__) is to the hidden target. This solver treats the problem as a search over a semantic space, using feedback from each guess to guide the next.
+
+> [!NOTE]
+> There’s a light parallel with **reinforcement learning**: guesses act as actions, the rankings resemble reward signals, and the embedding space serves as the environment. While there’s no learning involved, the feedback loop and the warmup stage imitates the exploration–exploitation trade-off.
 
 ## Preprocessing
 
-I started with a large English word list from another GitHub repo (not linked here), and used SpaCy to lemmatize the words—contexto ranks based on lemmas, not inflected forms. This reduced the word count by about 46%. After that, embeddings were generated using fastembed, and indexed in a private Qdrant collection (this can also be used locally by specifying the local path to the Qdrant DB).
+I began with a large English word list, then used [SpaCy](https://spacy.io) to lemmatize the words — since Contexto evaluates based on lemmas, not inflected forms. This reduced the vocabulary size significantly (~46%).
 
-The scripts for lemmatization and data indexing can be found in the preprocessing module.
+Embeddings were then generated using [fastembed](https://github.com/qdrant/fastembed) and stored in a Qdrant collection for efficient vector similarity search.
+
+Scripts for lemmatization and indexing are located in the `preprocessing` module.
 
 ## Solver Strategy
 
-The solver relies on:
+The solver is composed of:
 
-* An embedding model (via fastembed)
-* A Qdrant client to perform nearest-neighbor queries
-* A lightweight client that calls the contexto.me game API to retrieve rankings
+* A `fastembed`-based embedding model
+* A Qdrant client to perform similarity search
+* A Contexto client that fetches ranking feedback from the game using the contexto.me apis!
 
-Main strategy:
+### Core Steps:
 
-1. Start with some fixed "warmup" words (found online as good general-purpose openers)
-2. Use the top-k best guesses to compute a weighted average embedding that works as a centroid
-3. Query Qdrant with that embedding to get similar candidates
-4. Penalize words that are close to previously bad guesses (blacklist region)
-5. Repeat until the target is found or max guesses is reached
+1. **Warm-Up Phase**
+   The solver starts with a list of general-purpose starter words (e.g., *person*, *place*, *idea*, *animal*). These are broad enough to provide useful feedback early on.
 
-The solver also handles some edge cases, like when no useful candidates are found or a word returns an invalid response.
+2. **Centroid-Based Search**
+   From the top-performing previous guesses, it computes a weighted centroid embedding — where better-ranked guesses have higher weight. This acts as the next semantic search direction. A min-max scaling is used for the weights for the ranking.
+
+3. **Nearest Neighbor Retrieval**
+   The centroid is used to query Qdrant for the most semantically similar words.
+
+4. **Negative Feedback: penalizing bad words**:
+   * Poor guesses are clustered in embedding space using KMeans.
+   * Each cluster is scored by how poor its members are.
+   * Candidates close to these "bad regions" receive a penalty.
+   * The penalty is scaled by similarity to the cluster, cluster size, and average rank.
+
+   This helps the solver avoid repeatedly guessing within unproductive subregions of the vector space.
+
+5. **Fallback and Randomization**
+   If no strong candidates are found, or all high-similarity candidates are blacklisted, a random unseen word is selected to keep the exploration moving.
 
 ## Running the Solver
 
-Make sure you have:
-
-* A running Qdrant instance (local, dockerized or hosted) with the preloaded collection
-
-Then just run:
+As a first step install all the dependencies (I used uv as a package manager):
 
 ```bash
-python src/contextosolver/main.py
+uv venv
+uv sync
 ```
 
-This will attempt to solve a specific game (you can change the game ID in the script).
+Ensure that:
+
+* A Qdrant instance (local or remote) is running and has the preloaded collection
+* Environment variables for `QDRANT_URL` and `QDRANT_API_KEY` are set (if needed) in a `.env` file
+
+Then in the `src` folder run:
+
+```bash
+uv run main.py <game-id>
+```
+
+This will launch the solver on the specified game.
+
+## Tips
+
+* The number and quality of initial warmup words affect early convergence.
+* The negative penalty mechanism becomes most effective in the mid-to-late game when enough poor guesses have accumulated.
+* Adjust `ContextoConfig` to tune search aggressiveness (e.g., `top_k_words`, `top_n`, and penalty weights).
