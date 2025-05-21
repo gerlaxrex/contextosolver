@@ -1,5 +1,4 @@
 import numpy as np
-from pydantic import BaseModel
 from sklearn.cluster import KMeans
 import heapq
 import json
@@ -10,23 +9,11 @@ from typing import Optional, List, Tuple, Dict
 from fastembed import TextEmbedding
 from qdrant_client import QdrantClient, models
 from loguru import logger
-
 from src.contextosolver import DATA_PATH
+from src.contextosolver.config.contexto_config import ContextoConfig
 from src.contextosolver.solver.contexto_client import ContextoClient
 
 MAX_SCORE = 500_000
-
-
-class ContextoConfig(BaseModel):
-    initial_words: Optional[List[str]] = None
-    top_n: int = 10
-    max_guesses: int = 100
-    warmup_words: int = 10
-    top_k_words: int = 5
-    max_neg_words: int = 50
-    top_neg_words: int = 100
-    negative_threshold: int = 2000
-    negative_penalty_weight: float = 0.8
 
 
 class ContextoSolver:
