@@ -182,13 +182,6 @@ class ContextoSolver:
             key=lambda x: x[1],
         )
 
-        # take the negative matches
-        # worst_guesses = heapq.nsmallest(
-        #     min(self.config.max_neg_words, len(self.blacklisted_words)),
-        #     self.blacklisted_words.items(),
-        #     key=lambda x: x[1],
-        # )
-
         # inverse ranking weighting average
         centroid_embedding = self._weighted_embeddings(best_guesses)
         candidate_scores = {}
@@ -206,20 +199,7 @@ class ContextoSolver:
             if candidate not in self.words_to_exclude:
                 candidate_scores[candidate] = result.score
 
-        # now take the average for the clusters obtained in the blacklisted words
-        # blacklist_embedding = self._weighted_embeddings(sorted(worst_guesses, key=lambda x: x[1], reverse=True))
-        #
-        # negative_results = self.qdrant_client.query_points(
-        #     collection_name=self.collection_name,
-        #     query=blacklist_embedding,
-        #     limit=self.config.top_neg_words,
-        # )
-        #
-        # for negative_result in negative_results.points:
-        #     candidate = negative_result.payload["word"]
-        #     if candidate in candidate_scores:
-        #         candidate_scores[candidate] -= negative_result.score
-        self._clustered_negative_push(candidate_scores=candidate_scores)
+        self._clustered_negative_penalty(candidate_scores=candidate_scores)
 
         if not candidate_scores:
             return self._get_random_word()
@@ -274,7 +254,7 @@ if __name__ == "__main__":
         os.getenv("QDRANT_URL"),
         api_key=os.getenv("QDRANT_API_KEY"),
     )
-    contexto_client = ContextoClient(game_id=975)
+    contexto_client = ContextoClient(game_id=972)
 
     config = ContextoConfig(
         max_guesses=200,
