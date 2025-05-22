@@ -69,7 +69,13 @@ Ensure that:
 Then in the `src` folder run:
 
 ```bash
-uv run main.py <game-id>
+uv run main.py game_id=<game-id>
 ```
 
-This will launch the solver on the specified game.
+Since hydra has been used for the configuration loading, you can override any other configuration by command line:
+
+```bash
+uv run main.py game_id=<game-id> max_guesses=300
+```
+
+This will launch the solver on the specified game id.
