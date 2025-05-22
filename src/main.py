@@ -1,26 +1,25 @@
-import argparse
+import json
 
 from fastembed import TextEmbedding
 from qdrant_client import QdrantClient
 import os
+import hydra
+from dotenv import load_dotenv
+from loguru import logger
+from omegaconf import OmegaConf, DictConfig
+
+from contextosolver import ROOT_PATH
 from contextosolver.solver.contexto_client import ContextoClient
 from contextosolver.solver.contexto_solver import ContextoConfig, ContextoSolver
 
 
-def main(game_id: int):
+def run(game_id: int, config: ContextoConfig):
     embedding_model = TextEmbedding()
     qdrant_client = QdrantClient(
         os.getenv("QDRANT_URL"),
         api_key=os.getenv("QDRANT_API_KEY"),
     )
     contexto_client = ContextoClient(game_id=game_id)
-
-    config = ContextoConfig(
-        max_guesses=200,
-        warmup_words=12,
-        top_n=500,
-        top_k_words=3,
-    )
 
     # create the solver
     contexto_solver = ContextoSolver(
@@ -35,14 +34,19 @@ def main(game_id: int):
     return result
 
 
-if __name__ == "__main__":
-    from dotenv import load_dotenv
-
+@hydra.main(config_path=f"{ROOT_PATH}/config", config_name="config", version_base=None)
+def main(config: DictConfig):
     load_dotenv()
+    game_id = config["game_id"]
+    logger.info(f"Starting for game #{game_id}!")
+    config = ContextoConfig(**OmegaConf.to_container(config, resolve=True))
+    logger.info(f"Running with Configs:\n{json.dumps(config.model_dump(), indent=2)}")
+    run(game_id, config)
 
-    parser = argparse.ArgumentParser(
-        description="Run the game with a specific game ID."
-    )
-    parser.add_argument("game_id", type=str, help="The ID of the game to run")
-    args = parser.parse_args()
-    main(args.game_id)
+
+if __name__ == "__main__":
+    from pyfiglet import Figlet
+
+    f = Figlet(font="slant")
+    print(f.renderText("Contexto Solver"))
+    main()

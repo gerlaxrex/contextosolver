@@ -1,0 +1,7 @@
+top_n: 500
+max_guesses: 200
+warmup_words: 10
+top_k_words: 5
+top_neg_words: 100
+negative_threshold: 2000
+negative_penalty_weight: 0.8

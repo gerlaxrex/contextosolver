@@ -1,3 +1,4 @@
+import logging
 from typing import Optional
 
 import httpx
@@ -17,6 +18,8 @@ class ContextoClient:
         self._client = httpx.Client()
 
     def get_response(self, word: str) -> Optional[ContextoResponse]:
+        httpx_logger = logging.getLogger("httpx")
+        httpx_logger.setLevel(logging.WARNING)
         try:
             res = self._client.get(
                 url=f"{self.__base_url}/{word.strip()}",
