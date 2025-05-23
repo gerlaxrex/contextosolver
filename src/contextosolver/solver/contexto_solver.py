@@ -230,33 +230,3 @@ class ContextoSolver:
                 break
 
         return guesses
-
-
-if __name__ == "__main__":
-    import os
-
-    # dependencies
-    embedding_model = TextEmbedding()
-    qdrant_client = QdrantClient(
-        os.getenv("QDRANT_URL"),
-        api_key=os.getenv("QDRANT_API_KEY"),
-    )
-    contexto_client = ContextoClient(game_id=972)
-
-    config = ContextoConfig(
-        max_guesses=200,
-        warmup_words=12,
-        top_n=500,
-        top_k_words=3,
-    )
-
-    # create the solver
-    contexto_solver = ContextoSolver(
-        qdrant_client=qdrant_client,
-        embedding_model=embedding_model,
-        contexto_client=contexto_client,
-        collection_name="contexto_words",
-        config=config,
-    )
-
-    result = contexto_solver.solve()

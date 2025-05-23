@@ -23,7 +23,7 @@ def load_words_on_db(
     if (DATA_PATH / "checkpoint.json").exists():
         with open(DATA_PATH / "checkpoint.json", "r", encoding="utf-8") as f:
             checkpoint = json.load(f)
-            starting_batch = checkpoint[filename]
+            starting_batch = checkpoint.get(filename, 0)
 
     # Get words from file or direct list
     if word_list_path and pl.Path(word_list_path).exists():
@@ -37,15 +37,22 @@ def load_words_on_db(
 
     embedding_dim = len(list(embedding_model.embed("test"))[0])
 
-    if recreate and qdrant_client.collection_exists(collection_name=collection_name):
+    if (
+        starting_batch == 0
+        and recreate
+        and qdrant_client.collection_exists(collection_name=collection_name)
+    ):
         qdrant_client.delete_collection(collection_name=collection_name)
 
     if not qdrant_client.collection_exists(collection_name=collection_name):
         qdrant_client.create_collection(
             collection_name=collection_name,
             vectors_config=models.VectorParams(
-                size=embedding_dim, distance=models.Distance.COSINE
+                size=embedding_dim,
+                distance=models.Distance.COSINE,
+                on_disk=True,
             ),
+            timeout=100,
             # hnsw_config=models.HnswConfig(
             #     m=60,
             #     ef_construct=500,
@@ -54,7 +61,7 @@ def load_words_on_db(
         )
 
     # Process in batches to avoid memory issues
-    batch_size = 1000
+    batch_size = 100
     total_batches = (len(words) + batch_size - 1) // batch_size
 
     for batch_idx in range(starting_batch, total_batches):
@@ -76,7 +83,7 @@ def load_words_on_db(
         logger.info(
             f"Processed batch {batch_idx + 1}/{total_batches} ({len(batch_words)} words)"
         )
-        checkpoint[filename] = start_idx
+        checkpoint[filename] = batch_idx
 
         with open(DATA_PATH / "checkpoint.json", "w", encoding="utf-8") as f:
             json.dump(checkpoint, f)
@@ -91,11 +98,13 @@ def load_words_on_db(
 if __name__ == "__main__":
     from src.contextosolver import DATA_PATH
     import os
+    from dotenv import load_dotenv
 
-    embedding_model = TextEmbedding()
+    load_dotenv()
+
+    embedding_model = TextEmbedding(model_name="BAAI/bge-base-en")
     qdrant_client = QdrantClient(
-        os.getenv("QDRANT_URL"),
-        api_key=os.getenv("QDRANT_API_KEY"),
+        os.getenv("QDRANT_URL"), api_key=os.getenv("QDRANT_API_KEY"), https=True
     )
 
     load_words_on_db(

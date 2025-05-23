@@ -14,7 +14,7 @@ from contextosolver.solver.contexto_solver import ContextoConfig, ContextoSolver
 
 
 def run(game_id: int, config: ContextoConfig):
-    embedding_model = TextEmbedding()
+    embedding_model = TextEmbedding(model_name="BAAI/bge-base-en")
     qdrant_client = QdrantClient(
         os.getenv("QDRANT_URL"),
         api_key=os.getenv("QDRANT_API_KEY"),
