@@ -111,6 +111,6 @@ if __name__ == "__main__":
         qdrant_client=qdrant_client,
         embedding_model=embedding_model,
         collection_name="contexto_words",
-        word_list_path=DATA_PATH / "unique_lemmas.json",
+        word_list_path=DATA_PATH / "words.json",
         recreate=True,
     )
